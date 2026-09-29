@@ -1,0 +1,1 @@
+# wb-smart-slugs-alerts
