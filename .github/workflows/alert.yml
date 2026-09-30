@@ -11,17 +11,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
-        run: pip install requests
-      - name: Run SMART slugs check
+      - run: pip install requests
+      - run: python smart_slugs.py
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
-        run: python smart_slugs.py
-      - name: Save history to prevent duplicates
-        run: |
-          git config user.name "wb-bot"
-          git config user.email "bot@wb.com"
-          git add seen_slugs.json || echo "no history yet"
-          git diff --staged --quiet || git commit -m "update seen_slugs [skip ci]"
-          git push || echo "push failed"
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+      - run: |
+          git config user.name "bot"
+          git config user.email "bot@bot.com"
+          git add seen_slugs.json || true
+          git commit -m "update history" || true
+          git push || true
