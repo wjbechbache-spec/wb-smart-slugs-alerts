@@ -1,21 +1,7 @@
-name: WB SMART Slugs Alert - Every 2h Email
-
-on:
-  schedule:
-    - cron: '0 */2 * * *'  # toutes les 2 heures
-  workflow_dispatch:  # permet de lancer à la main
-
-jobs:
-  alert:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install requests
-      - name: Run SMART filter and send email
-        env:
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
-        run: python smart_slugs.py
+      - name: Save history to prevent duplicates
+        run: |
+          git config user.name "wb-bot"
+          git config user.email "bot@wb.com"
+          git add seen_slugs.json || echo "no history yet"
+          git diff --staged --quiet || git commit -m "update seen_slugs [skip ci]"
+          git push || echo "push failed"
