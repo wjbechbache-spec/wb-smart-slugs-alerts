@@ -1,43 +1,94 @@
-import os, json
+import requests, smtplib, json, os
+from datetime import datetime, timedelta, timezone
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
-HISTORY_FILE = "seen_slugs.json"
+GAMMA_URL = "https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&order=volume24hr&ascending=false"
 
-# Charge historique
-if os.path.exists(HISTORY_FILE):
-    with open(HISTORY_FILE, "r") as f:
-        seen_slugs = set(json.load(f))
-else:
-    seen_slugs = set()
+SERIOUS_KEYWORDS = ["uk", "britain", "england", "parliament", "commons", "lords", "prime minister", "bank of england", "inflation", "gdp", "election", "law", "bill", "ftse", "boe"]
 
-# --- TON CODE EXISTANT QUI RÉCUPÈRE new_slugs ---
-# Garde tout ton code d'avant pour récupérer depuis Polymarket
+BANNED_KEYWORDS = ["elon", "meme", "tiktok", "mrbeast", "tweet", "dogecoin"]
 
-# --- NOUVEAU: FILTRE FORT IMPACT ---
-def is_high_impact(slug, vol):
-    low_impact_keywords = ["senate-election-winner", "house-election", "governor-winner"]
-    if any(k in slug for k in low_impact_keywords):
-        return vol >= 2_000_000  # Rejette Kansas 444k et Ohio 841k
-    return True
+# --- NOUVEAU : BLACKLIST TIER C (US Local) ---
+TIER_C_BLACKLIST = ["governor", "mayor", "city-council", "house-distr", "texas-senate", "senate-election-winner", "kansas-senate", "ohio-senate"]
 
-# Applique les 3 filtres
-truly_new = []
-for item in new_slugs: # new_slugs vient de ton code existant
-    if item['slug'] in seen_slugs:
-        continue
-    if not is_high_impact(item['slug'], item.get('volume',0)):
-        print(f"Rejet faible impact: {item['slug']}")
-        continue
-    if item.get('tier','A') not in ['A','B']:
-        continue
-    truly_new.append(item)
+SEEN_FILE = "seen_slugs.json"
 
-if not truly_new:
-    print("Aucun nouveau slug SMART à fort impact")
-    exit(0)
+def is_smart(event):
+    title = (event.get("title") or "").lower()
+    desc = (event.get("description") or "").lower()
+    slug = (event.get("slug") or "").lower()
+    
+    text = f"{title} {desc} {slug}"
 
-# --- TON CODE D'ENVOI EMAIL avec truly_new ---
+    # 1. Bloque Tier C US Local
+    if any(k in text for k in TIER_C_BLACKLIST):
+        return False
 
-# Sauvegarde après envoi
-seen_slugs.update([s['slug'] for s in truly_new])
-with open(HISTORY_FILE, "w") as f:
-    json.dump(list(seen_slugs), f, indent=2)
+    # 2. Bloque BANNED
+    if any(k in text for k in BANNED_KEYWORDS):
+        return False
+
+    # 3. Garde SMART
+    if any(k in text for k in SERIOUS_KEYWORDS):
+        return True
+    
+    return False
+
+def main():
+    # Charge historique
+    if os.path.exists(SEEN_FILE):
+        with open(SEEN_FILE, "r") as f:
+            seen_slugs = set(json.load(f))
+    else:
+        seen_slugs = set()
+
+    print(f"Fetching {GAMMA_URL}")
+    r = requests.get(GAMMA_URL, timeout=20)
+    r.raise_for_status()
+    events = r.json()
+
+    new_slugs = []
+    for ev in events:
+        slug = ev.get("slug")
+        if not slug:
+            continue
+        if slug in seen_slugs:
+            continue
+        if is_smart(ev):
+            new_slugs.append(ev)
+
+    if not new_slugs:
+        print("Aucun nouveau slug SMART à fort impact")
+        return
+
+    # Prépare email
+    body = f"Nouveaux SMART slugs trouvés ({len(new_slugs)}):\n\n"
+    for ev in new_slugs:
+        body += f"- {ev.get('title')} | slug: {ev.get('slug')} | vol: {ev.get('volume24hr', 'N/A')}\nhttps://polymarket.com/event/{ev.get('slug')}\n\n"
+
+    print(body)
+
+    # Envoi email
+    gmail_user = os.getenv("GMAIL_USER")
+    gmail_pass = os.getenv("GMAIL_PASS")
+    if gmail_user and gmail_pass:
+        msg = MIMEMultipart()
+        msg['From'] = gmail_user
+        msg['To'] = gmail_user
+        msg['Subject'] = f"[SMART ALERT] {len(new_slugs)} nouveaux slugs"
+        msg.attach(MIMEText(body, 'plain'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(gmail_user, gmail_pass)
+            server.send_message(msg)
+        print("Email envoyé")
+    else:
+        print("GMAIL secrets non configurés")
+
+    # Sauvegarde historique
+    seen_slugs.update([e.get("slug") for e in new_slugs])
+    with open(SEEN_FILE, "w") as f:
+        json.dump(list(seen_slugs), f, indent=2)
+
+if __name__ == "__main__":
+    main()
