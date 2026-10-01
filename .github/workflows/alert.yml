@@ -14,7 +14,7 @@ jobs:
       - run: pip install requests
       - run: python smart_slugs.py
         env:
-                GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
           GMAIL_TO: ${{ secrets.GMAIL_TO }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_PASS }}
