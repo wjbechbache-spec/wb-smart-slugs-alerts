@@ -14,9 +14,11 @@ jobs:
       - run: pip install requests
       - run: python smart_slugs.py
         env:
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+                GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
+          GMAIL_TO: ${{ secrets.GMAIL_TO }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_PASS }}
+          TO_EMAIL: ${{ secrets.GMAIL_TO }}
       - run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
