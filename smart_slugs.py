@@ -1,94 +1,78 @@
-import requests, smtplib, json, os
-from datetime import datetime, timedelta, timezone
+import os, json, requests, smtplib
 from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from datetime import datetime
 
-GAMMA_URL = "https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&order=volume24hr&ascending=false"
-
-SERIOUS_KEYWORDS = ["uk", "britain", "england", "parliament", "commons", "lords", "prime minister", "bank of england", "inflation", "gdp", "election", "law", "bill", "ftse", "boe"]
-
-BANNED_KEYWORDS = ["elon", "meme", "tiktok", "mrbeast", "tweet", "dogecoin"]
-
-# --- NOUVEAU : BLACKLIST TIER C (US Local) ---
-TIER_C_BLACKLIST = ["governor", "mayor", "city-council", "house-distr", "texas-senate", "senate-election-winner", "kansas-senate", "ohio-senate"]
-
+GAMMA_URL = "https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false"
 SEEN_FILE = "seen_slugs.json"
 
+# Tes mots-clés (garde les tiens)
+SERIOUS_KEYWORDS = ["presidential", "election", "senate", "house", "prime minister", "israel", "russia", "ukraine", "brazil"]
+BANNED_KEYWORDS = ["nfl", "cfb", "football", "basketball"]
+
 def is_smart(event):
-    title = (event.get("title") or "").lower()
-    desc = (event.get("description") or "").lower()
-    slug = (event.get("slug") or "").lower()
-    
-    text = f"{title} {desc} {slug}"
-
-    # 1. Bloque Tier C US Local
-    if any(k in text for k in TIER_C_BLACKLIST):
-        return False
-
-    # 2. Bloque BANNED
+    text = (event.get("title","") + " " + event.get("slug","")).lower()
     if any(k in text for k in BANNED_KEYWORDS):
         return False
-
-    # 3. Garde SMART
     if any(k in text for k in SERIOUS_KEYWORDS):
         return True
-    
     return False
 
 def main():
-    # Charge historique
+    # 1. Charge l'historique
     if os.path.exists(SEEN_FILE):
         with open(SEEN_FILE, "r") as f:
             seen_slugs = set(json.load(f))
     else:
         seen_slugs = set()
-
-    print(f"Fetching {GAMMA_URL}")
+    
+    print(f"Fetching {GAMMA_URL} - {len(seen_slugs)} already seen")
     r = requests.get(GAMMA_URL, timeout=20)
     r.raise_for_status()
     events = r.json()
 
+    all_slugs = []
     new_slugs = []
     for ev in events:
+        if not is_smart(ev):
+            continue
         slug = ev.get("slug")
         if not slug:
             continue
-        if slug in seen_slugs:
-            continue
-        if is_smart(ev):
+        all_slugs.append(slug)
+        if slug not in seen_slugs:
             new_slugs.append(ev)
 
+    print(f"Found {len(all_slugs)} SMART, {len(new_slugs)} NEW")
+
+    # 2. Si rien de nouveau, on sauvegarde quand même tout pour ne pas répéter
+    # On met à jour la mémoire avec TOUS les slugs vus
+    seen_slugs.update(all_slugs)
+    with open(SEEN_FILE, "w") as f:
+        json.dump(sorted(list(seen_slugs)), f, indent=2)
+    
+    print(f"Saved {len(seen_slugs)} slugs to {SEEN_FILE}")
+
     if not new_slugs:
-        print("Aucun nouveau slug SMART à fort impact")
+        print("No new slugs, no email")
         return
 
-    # Prépare email
+    # 3. Envoie l'email seulement pour les vrais nouveaux
     body = f"Nouveaux SMART slugs trouvés ({len(new_slugs)}):\n\n"
-    for ev in new_slugs:
-        body += f"- {ev.get('title')} | slug: {ev.get('slug')} | vol: {ev.get('volume24hr', 'N/A')}\nhttps://polymarket.com/event/{ev.get('slug')}\n\n"
+    for ev in new_slugs[:20]:
+        vol = ev.get("volume", "N/A")
+        slug = ev.get("slug")
+        title = ev.get("title")
+        body += f"- {title} | slug: {slug} | vol: {vol}\nhttps://polymarket.com/event/{slug}\n\n"
 
-    print(body)
+    msg = MIMEText(body)
+    msg["Subject"] = f"[SMART ALERT] {len(new_slugs)} nouveaux slugs"
+    msg["From"] = os.environ["EMAIL_FROM"]
+    msg["To"] = os.environ["EMAIL_TO"]
 
-    # Envoi email
-    gmail_user = os.getenv("GMAIL_USER")
-    gmail_pass = os.getenv("GMAIL_PASS")
-    if gmail_user and gmail_pass:
-        msg = MIMEMultipart()
-        msg['From'] = gmail_user
-        msg['To'] = gmail_user
-        msg['Subject'] = f"[SMART ALERT] {len(new_slugs)} nouveaux slugs"
-        msg.attach(MIMEText(body, 'plain'))
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(gmail_user, gmail_pass)
-            server.send_message(msg)
-        print("Email envoyé")
-    else:
-        print("GMAIL secrets non configurés")
-
-    # Sauvegarde historique
-    seen_slugs.update([e.get("slug") for e in new_slugs])
-    with open(SEEN_FILE, "w") as f:
-        json.dump(list(seen_slugs), f, indent=2)
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(os.environ["EMAIL_FROM"], os.environ["GMAIL_APP_PASSWORD"])
+        server.send_message(msg)
+    print("Email sent")
 
 if __name__ == "__main__":
     main()
